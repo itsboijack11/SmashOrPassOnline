@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Multiplayer Race</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background-color: #f4f4f9;
+      margin: 0;
+      padding: 20px;
+    }
+    .card {
+      background: white;
+      max-width: 400px;
+      margin: 20px auto;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 16px;
+      cursor: pointer;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      margin-top: 10px;
+    }
+    button:disabled {
+      background: #ccc;
+    }
+    input {
+      padding: 8px;
+      font-size: 16px;
+      width: 70%;
+    }
+    .score-board {
+      font-size: 20px;
+      margin: 15px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Multiplayer Tap Race</h1>
+
+  <div class="card" id="setup-card">
+    <h3>1. Connection Setup</h3>
+    <p>Your Peer ID: <strong id="my-id">Connecting...</strong></p>
+    
+    <hr>
+    
+    <p>Join a Friend:</p>
+    <input type="text" id="host-id-input" placeholder="Enter Friend's ID">
+    <button onclick="connectToHost()">Connect</button>
+  </div>
+
+  <div class="card" id="game-card" style="display: none;">
+    <h3>2. Race to 20 Taps!</h3>
+    <div class="score-board">
+      <p>Your Score: <span id="my-score">0</span></p>
+      <p>Opponent Score: <span id="opponent-score">0</span></p>
+    </div>
+    <button id="tap-btn" onclick="registerTap()">TAP!</button>
+    <h2 id="status-msg"></h2>
+  </div>
+
+  <script>
+    let peer = new Peer();
+    let conn = null;
+    let myScore = 0;
+    let opponentScore = 0;
+    let gameOver = false;
+
+    // Display generated Peer ID
+    peer.on('open', (id) => {
+      document.getElementById('my-id').innerText = id;
+    });
+
+    // Handle incoming connections (Host side)
+    peer.on('connection', (connection) => {
+      conn = connection;
+      setupConnection();
+    });
+
+    // Connect to another peer (Guest side)
+    function connectToHost() {
+      const hostId = document.getElementById('host-id-input').value.trim();
+      if (hostId) {
+        conn = peer.connect(hostId);
+        setupConnection();
+      }
+    }
+
+    // Bind event handlers to the active connection
+    function setupConnection() {
+      conn.on('open', () => {
+        document.getElementById('setup-card').style.display = 'none';
+        document.getElementById('game-card').style.display = 'block';
+      });
+
+      conn.on('data', (data) => {
+        if (data.type === 'SCORE_UPDATE') {
+          opponentScore = data.score;
+          document.getElementById('opponent-score').innerText = opponentScore;
+          checkWinner();
+        }
+      });
+    }
+
+    // Handle user input
+    function registerTap() {
+      if (gameOver) return;
+
+      myScore++;
+      document.getElementById('my-score').innerText = myScore;
+      
+      // Send data to peer
+      if (conn && conn.open) {
+        conn.send({ type: 'SCORE_UPDATE', score: myScore });
+      }
+
+      checkWinner();
+    }
+
+    // Determine match state
+    function checkWinner() {
+      const statusMsg = document.getElementById('status-msg');
+      if (myScore >= 20) {
+        statusMsg.innerText = ' You Won!';
+        statusMsg.style.color = 'green';
+        endGame();
+      } else if (opponentScore >= 20) {
+        statusMsg.innerText = ' You Lost!';
+        statusMsg.style.color = 'red';
+        endGame();
+      }
+    }
+
+    function endGame() {
+      gameOver = true;
+      document.getElementById('tap-btn').disabled = true;
+    }
+  </script>
+</body>
+</html>
