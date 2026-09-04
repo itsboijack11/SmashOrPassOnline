@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>P2P Multiplayer Race</title>
+  <title>Smash or Pass Multiplayer</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     body {
@@ -21,33 +21,60 @@
       border-radius: 8px;
       box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
+    .btn-container {
+      display: flex;
+      justify-content: space-around;
+      margin-top: 20px;
+    }
     button {
-      padding: 10px 20px;
+      padding: 12px 24px;
       font-size: 16px;
+      font-weight: bold;
       cursor: pointer;
-      background: #007bff;
       color: white;
       border: none;
-      border-radius: 4px;
+      border-radius: 6px;
+      transition: background 0.2s;
+    }
+    .btn-connect {
+      background: #007bff;
+      width: 100%;
       margin-top: 10px;
+    }
+    .btn-smash {
+      background: #28a745;
+    }
+    .btn-smash:hover {
+      background: #218838;
+    }
+    .btn-pass {
+      background: #dc3545;
+    }
+    .btn-pass:hover {
+      background: #c82333;
     }
     button:disabled {
       background: #ccc;
+      cursor: not-allowed;
     }
     input {
       padding: 8px;
       font-size: 16px;
       width: 70%;
     }
-    .score-board {
-      font-size: 20px;
+    .stats-board {
+      font-size: 18px;
       margin: 15px 0;
+      text-align: left;
+    }
+    .stats-board p {
+      margin: 8px 0;
     }
   </style>
 </head>
 <body>
 
-  <h1>Multiplayer Tap Race</h1>
+  <h1>Smash or Pass Counter</h1>
 
   <div class="card" id="setup-card">
     <h3>1. Connection Setup</h3>
@@ -57,25 +84,33 @@
     
     <p>Join a Friend:</p>
     <input type="text" id="host-id-input" placeholder="Enter Friend's ID">
-    <button onclick="connectToHost()">Connect</button>
+    <button class="btn-connect" onclick="connectToHost()">Connect</button>
   </div>
 
   <div class="card" id="game-card" style="display: none;">
-    <h3>2. Race to 20 Taps!</h3>
-    <div class="score-board">
-      <p>Your Score: <span id="my-score">0</span></p>
-      <p>Opponent Score: <span id="opponent-score">0</span></p>
+    <h3>2. Cast Your Vote</h3>
+    
+    <div class="btn-container">
+      <button class="btn-smash" id="smash-btn" onclick="registerVote('smash')">SMASH</button>
+      <button class="btn-pass" id="pass-btn" onclick="registerVote('pass')">PASS</button>
     </div>
-    <button id="tap-btn" onclick="registerTap()">TAP!</button>
-    <h2 id="status-msg"></h2>
+
+    <div class="stats-board">
+      <hr>
+      <p><strong>Your Stats:</strong></p>
+      <p>Smashes: <span id="my-smashes">0</span> | Passes: <span id="my-passes">0</span></p>
+      <hr>
+      <p><strong>Opponent Stats:</strong></p>
+      <p>Smashes: <span id="opp-smashes">0</span> | Passes: <span id="opp-passes">0</span></p>
+    </div>
   </div>
 
   <script>
     let peer = new Peer();
     let conn = null;
-    let myScore = 0;
-    let opponentScore = 0;
-    let gameOver = false;
+
+    let myStats = { smash: 0, pass: 0 };
+    let oppStats = { smash: 0, pass: 0 };
 
     // Display generated Peer ID
     peer.on('open', (id) => {
@@ -105,46 +140,28 @@
       });
 
       conn.on('data', (data) => {
-        if (data.type === 'SCORE_UPDATE') {
-          opponentScore = data.score;
-          document.getElementById('opponent-score').innerText = opponentScore;
-          checkWinner();
+        if (data.type === 'VOTE_UPDATE') {
+          oppStats = data.stats;
+          document.getElementById('opp-smashes').innerText = oppStats.smash;
+          document.getElementById('opp-passes').innerText = oppStats.pass;
         }
       });
     }
 
-    // Handle user input
-    function registerTap() {
-      if (gameOver) return;
+    // Handle button clicks
+    function registerVote(type) {
+      if (type === 'smash') {
+        myStats.smash++;
+        document.getElementById('my-smashes').innerText = myStats.smash;
+      } else if (type === 'pass') {
+        myStats.pass++;
+        document.getElementById('my-passes').innerText = myStats.pass;
+      }
 
-      myScore++;
-      document.getElementById('my-score').innerText = myScore;
-      
-      // Send data to peer
+      // Send updated choices to peer live
       if (conn && conn.open) {
-        conn.send({ type: 'SCORE_UPDATE', score: myScore });
+        conn.send({ type: 'VOTE_UPDATE', stats: myStats });
       }
-
-      checkWinner();
-    }
-
-    // Determine match state
-    function checkWinner() {
-      const statusMsg = document.getElementById('status-msg');
-      if (myScore >= 20) {
-        statusMsg.innerText = ' You Won!';
-        statusMsg.style.color = 'green';
-        endGame();
-      } else if (opponentScore >= 20) {
-        statusMsg.innerText = ' You Lost!';
-        statusMsg.style.color = 'red';
-        endGame();
-      }
-    }
-
-    function endGame() {
-      gameOver = true;
-      document.getElementById('tap-btn').disabled = true;
     }
   </script>
 </body>
