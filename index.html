@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Smash or Pass Multiplayer</title>
+  <title>3-Player Lobby Game</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     body {
@@ -15,7 +15,7 @@
     }
     .card {
       background: white;
-      max-width: 400px;
+      max-width: 450px;
       margin: 20px auto;
       padding: 20px;
       border-radius: 8px;
@@ -27,141 +27,254 @@
       margin-top: 20px;
     }
     button {
-      padding: 12px 24px;
+      padding: 10px 20px;
       font-size: 16px;
       font-weight: bold;
       cursor: pointer;
       color: white;
       border: none;
       border-radius: 6px;
-      transition: background 0.2s;
+      margin: 5px;
     }
-    .btn-connect {
-      background: #007bff;
-      width: 100%;
-      margin-top: 10px;
-    }
-    .btn-smash {
-      background: #28a745;
-    }
-    .btn-smash:hover {
-      background: #218838;
-    }
-    .btn-pass {
-      background: #dc3545;
-    }
-    .btn-pass:hover {
-      background: #c82333;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
+    .btn-primary { background: #007bff; }
+    .btn-success { background: #28a745; }
+    .btn-danger { background: #dc3545; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
     input {
       padding: 8px;
       font-size: 16px;
-      width: 70%;
+      width: 80%;
+      margin: 5px 0;
+    }
+    .player-list {
+      text-align: left;
+      background: #eee;
+      padding: 10px;
+      border-radius: 5px;
+      margin: 10px 0;
     }
     .stats-board {
-      font-size: 18px;
-      margin: 15px 0;
       text-align: left;
-    }
-    .stats-board p {
-      margin: 8px 0;
+      margin-top: 15px;
     }
   </style>
 </head>
 <body>
 
-  <h1>Smash or Pass Counter</h1>
+  <h1>Multiplayer Game Room</h1>
 
+  <!-- Setup Card -->
   <div class="card" id="setup-card">
-    <h3>1. Connection Setup</h3>
-    <p>Your Peer ID: <strong id="my-id">Connecting...</strong></p>
-    
+    <h3>Join or Host</h3>
+    <input type="text" id="username-input" placeholder="Enter Your Name">
     <hr>
-    
-    <p>Join a Friend:</p>
-    <input type="text" id="host-id-input" placeholder="Enter Friend's ID">
-    <button class="btn-connect" onclick="connectToHost()">Connect</button>
+    <button class="btn-primary" onclick="createRoom()">Host New Game</button>
+    <p>OR</p>
+    <input type="text" id="host-id-input" placeholder="Enter Host Room Code">
+    <button class="btn-primary" onclick="joinRoom()">Join Game</button>
   </div>
 
+  <!-- Lobby Card -->
+  <div class="card" id="lobby-card" style="display: none;">
+    <h3>Lobby</h3>
+    <p>Room Code: <strong id="room-code-display">---</strong></p>
+    <div class="player-list">
+      <strong>Players (<span id="player-count">1</span>/3):</strong>
+      <ul id="players-ul"></ul>
+    </div>
+    <button id="start-btn" class="btn-success" style="display: none;" onclick="startGame()">Start Game (Host Only)</button>
+    <p id="waiting-msg">Waiting for the host to start...</p>
+  </div>
+
+  <!-- Game Arena -->
   <div class="card" id="game-card" style="display: none;">
-    <h3>2. Cast Your Vote</h3>
-    
+    <h3>Game Active</h3>
     <div class="btn-container">
-      <button class="btn-smash" id="smash-btn" onclick="registerVote('smash')">SMASH</button>
-      <button class="btn-pass" id="pass-btn" onclick="registerVote('pass')">PASS</button>
+      <button class="btn-success" onclick="sendAction('OPTION_A')">Option A</button>
+      <button class="btn-danger" onclick="sendAction('OPTION_B')">Option B</button>
     </div>
 
-    <div class="stats-board">
-      <hr>
-      <p><strong>Your Stats:</strong></p>
-      <p>Smashes: <span id="my-smashes">0</span> | Passes: <span id="my-passes">0</span></p>
-      <hr>
-      <p><strong>Opponent Stats:</strong></p>
-      <p>Smashes: <span id="opp-smashes">0</span> | Passes: <span id="opp-passes">0</span></p>
+    <div class="stats-board" id="stats-board">
+      <h4>Scores:</h4>
+      <!-- Dynamic scores rendered here -->
     </div>
   </div>
 
   <script>
-    let peer = new Peer();
-    let conn = null;
+    let peer = null;
+    let isHost = false;
+    let myName = "";
+    let roomCode = "";
+    
+    // Host state management
+    let clients = []; // Connections array for host
+    let players = []; // Metadata array: [{ id, name, optionA: 0, optionB: 0 }]
+    let hostConn = null; // Client's single connection to host
 
-    let myStats = { smash: 0, pass: 0 };
-    let oppStats = { smash: 0, pass: 0 };
-
-    // Display generated Peer ID
-    peer.on('open', (id) => {
-      document.getElementById('my-id').innerText = id;
-    });
-
-    // Handle incoming connections (Host side)
-    peer.on('connection', (connection) => {
-      conn = connection;
-      setupConnection();
-    });
-
-    // Connect to another peer (Guest side)
-    function connectToHost() {
-      const hostId = document.getElementById('host-id-input').value.trim();
-      if (hostId) {
-        conn = peer.connect(hostId);
-        setupConnection();
+    // Auto-load saved credentials from browser memory
+    window.onload = () => {
+      if (localStorage.getItem('saved_username')) {
+        document.getElementById('username-input').value = localStorage.getItem('saved_username');
       }
+      if (localStorage.getItem('saved_room_code')) {
+        document.getElementById('host-id-input').value = localStorage.getItem('saved_room_code');
+      }
+    };
+
+    function saveCredentials() {
+      myName = document.getElementById('username-input').value.trim() || "Player";
+      localStorage.setItem('saved_username', myName);
     }
 
-    // Bind event handlers to the active connection
-    function setupConnection() {
-      conn.on('open', () => {
-        document.getElementById('setup-card').style.display = 'none';
-        document.getElementById('game-card').style.display = 'block';
+    // Host initializes room
+    function createRoom() {
+      saveCredentials();
+      isHost = true;
+      peer = new Peer();
+
+      peer.on('open', (id) => {
+        roomCode = id;
+        localStorage.setItem('saved_room_code', roomCode);
+        document.getElementById('room-code-display').innerText = roomCode;
+        
+        // Add host as Player 1
+        players.push({ id: id, name: myName + " (Host)", optionA: 0, optionB: 0 });
+        
+        showLobby();
+        document.getElementById('start-btn').style.display = 'inline-block';
+        document.getElementById('waiting-msg').style.display = 'none';
+        updateLobbyUI();
       });
 
-      conn.on('data', (data) => {
-        if (data.type === 'VOTE_UPDATE') {
-          oppStats = data.stats;
-          document.getElementById('opp-smashes').innerText = oppStats.smash;
-          document.getElementById('opp-passes').innerText = oppStats.pass;
+      // Handle incoming players (Max 3 total)
+      peer.on('connection', (conn) => {
+        if (players.length >= 3) {
+          conn.on('open', () => conn.send({ type: 'ERROR', msg: 'Room full (Max 3 players)' }));
+          setTimeout(() => conn.close(), 500);
+          return;
         }
+
+        clients.push(conn);
+
+        conn.on('data', (data) => {
+          if (data.type === 'JOIN') {
+            players.push({ id: conn.peer, name: data.name, optionA: 0, optionB: 0 });
+            broadcast({ type: 'LOBBY_UPDATE', players: players });
+            updateLobbyUI();
+          }
+          if (data.type === 'ACTION') {
+            handlePlayerAction(conn.peer, data.action);
+          }
+        });
+
+        conn.on('close', () => {
+          players = players.filter(p => p.id !== conn.peer);
+          clients = clients.filter(c => c.peer !== conn.peer);
+          broadcast({ type: 'LOBBY_UPDATE', players: players });
+          updateLobbyUI();
+        });
       });
     }
 
-    // Handle button clicks
-    function registerVote(type) {
-      if (type === 'smash') {
-        myStats.smash++;
-        document.getElementById('my-smashes').innerText = myStats.smash;
-      } else if (type === 'pass') {
-        myStats.pass++;
-        document.getElementById('my-passes').innerText = myStats.pass;
-      }
+    // Client joins existing room
+    function joinRoom() {
+      saveCredentials();
+      isHost = false;
+      roomCode = document.getElementById('host-id-input').value.trim();
+      if (!roomCode) return alert("Please enter a Room Code.");
+      
+      localStorage.setItem('saved_room_code', roomCode);
+      peer = new Peer();
 
-      // Send updated choices to peer live
-      if (conn && conn.open) {
-        conn.send({ type: 'VOTE_UPDATE', stats: myStats });
+      peer.on('open', () => {
+        hostConn = peer.connect(roomCode);
+
+        hostConn.on('open', () => {
+          hostConn.send({ type: 'JOIN', name: myName });
+          showLobby();
+          document.getElementById('room-code-display').innerText = roomCode;
+        });
+
+        hostConn.on('data', (data) => {
+          if (data.type === 'LOBBY_UPDATE') {
+            players = data.players;
+            updateLobbyUI();
+          }
+          if (data.type === 'START_GAME') {
+            showGameScreen();
+          }
+          if (data.type === 'STATS_UPDATE') {
+            players = data.players;
+            renderStats();
+          }
+          if (data.type === 'ERROR') {
+            alert(data.msg);
+          }
+        });
+      });
+    }
+
+    function showLobby() {
+      document.getElementById('setup-card').style.display = 'none';
+      document.getElementById('lobby-card').style.display = 'block';
+    }
+
+    function updateLobbyUI() {
+      document.getElementById('player-count').innerText = players.length;
+      const list = document.getElementById('players-ul');
+      list.innerHTML = '';
+      players.forEach(p => {
+        const li = document.createElement('li');
+        li.innerText = p.name;
+        list.appendChild(li);
+      });
+    }
+
+    // Host triggers game start for everyone
+    function startGame() {
+      if (!isHost) return;
+      broadcast({ type: 'START_GAME' });
+      showGameScreen();
+    }
+
+    function showGameScreen() {
+      document.getElementById('lobby-card').style.display = 'none';
+      document.getElementById('game-card').style.display = 'block';
+      renderStats();
+    }
+
+    function sendAction(actionType) {
+      if (isHost) {
+        handlePlayerAction(peer.id, actionType);
+      } else if (hostConn && hostConn.open) {
+        hostConn.send({ type: 'ACTION', action: actionType });
       }
+    }
+
+    function handlePlayerAction(peerId, actionType) {
+      let player = players.find(p => p.id === peerId);
+      if (player) {
+        if (actionType === 'OPTION_A') player.optionA++;
+        if (actionType === 'OPTION_B') player.optionB++;
+        broadcast({ type: 'STATS_UPDATE', players: players });
+        renderStats();
+      }
+    }
+
+    function broadcast(data) {
+      clients.forEach(conn => {
+        if (conn.open) conn.send(data);
+      });
+    }
+
+    function renderStats() {
+      const board = document.getElementById('stats-board');
+      board.innerHTML = '<h4>Scores:</h4>';
+      players.forEach(p => {
+        const pEl = document.createElement('p');
+        pEl.innerHTML = `<strong>${p.name}:</strong> Option A: ${p.optionA} | Option B: ${p.optionB}`;
+        board.appendChild(pEl);
+      });
     }
   </script>
 </body>
